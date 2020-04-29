@@ -1,56 +1,41 @@
-import rosbag
-import numpy as np
+import os
 import pandas as pd
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import pdb
-import StringIO
-import boto3
+
+from baganalytics import BagLoader
+from baganalytics import load_fmcl_localization_data, visualize_coordinates
+
+# Logging
+import logging
+logging.basicConfig(level=logging.INFO)
 
 
-def export_to_csv(bag):
-    df_rows = []
-    for topic, msg, time in bag.read_messages(topics=['/fmcl/pose']):
-        df_rows.append(
-            pd.DataFrame([
-                [time, msg.pose.pose.position.x, msg.pose.pose.position.y]
-            ], columns=['time', 'x', 'y'])
-        )
-
-    position_df = pd.concat(df_rows, ignore_index=True)
-    position_df.index = position_df['time']
-    position_df.to_csv("fmcl_pose.csv", index=False)
+DATA_DIR = 'bags'
 
 
-def visualize_coordinates(bag):
-    rows = []
-    for topic, msg, time in bag.read_messages(topics=['/fmcl/localization_score']):
-        rows.append(
-            pd.DataFrame([
-                [time, msg.pose.position.x, msg.pose.position.y, msg.scores.importance, msg.scores.likelihood]
-            ], columns=['time', 'x', 'y', 'importance', 'likelihood'])
-        )
-
-    df = pd.concat(rows, ignore_index=True)
-    df.index = df['time']
-
-    ax = plt.axes(projection='3d')
-    ax.scatter3D(df['x'].to_numpy(), df['y'].to_numpy(), df['likelihood'].to_numpy()+0.1, 'gray')
-    ax.scatter3D(df['x'].to_numpy(), df['y'].to_numpy(), df['importance'].to_numpy(), 'red')
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_zlabel('likelihood or importance')
-    ax.set_title('coordinate vs localization likelihood/importance')
-    plt.show()
+def download():
+    session = boto3.Session(profile_name='fetchcore-production')
+    loader = BagLoader(session, 'arrow-rt.fetchcore-cloud.com')
+    keys = loader.list_keys(robot='freight100-1173', action='navigate', num_keys=10)
+    logger.info('successfully fetched %s keys, now proceeding to download' % len(keys))
+    bags = loader.download_bags(keys, data_dir='bags')
 
 
 if __name__ == '__main__':
-    filename = '2020-04-09-14-03-05.047358_task-68747_action-246476_freight100-1173_0.bag'
-    bag = rosbag.Bag(filename)
-    # visualize_coordinates(bag)
+    logger = logging.getLogger(__name__)
     
-    for topic, msg, time in bag.read_messages(topics=['/fmcl/particle_cloud_debug']):
-        print("=====================================================================")
-        print msg
+    filepaths = []
+    for f in os.listdir(DATA_DIR):
+        path = os.path.join(DATA_DIR, f)
+        if os.path.isfile(path):
+            filepaths.append(path)
 
-    bag.close()
+    logger.info('found %s bags in directory %s' % (len(filepaths), DATA_DIR))
+    
+    dfs = []
+    for path in filepaths:
+        df = load_fmcl_localization_data(path)
+        if df is not None:
+            dfs.append(df)
+
+    final_df = pd.concat(dfs, axis=0)
+    visualize_coordinates(final_df)
