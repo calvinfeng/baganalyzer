@@ -8,37 +8,43 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def load_fmcl_localization_data(filename):
+def load_fmcl_localization_data(filepath):
     """Extract localization status data from a bag file into DataFrame
     """
     try:
-        bag = rosbag.Bag(filename)   
+        bag = rosbag.Bag(filepath)   
     except rosbag.bag.ROSBagUnindexedException:
-        logger.warn('%s is unindexed' % filename)
+        logger.warn('%s is unindexed' % filepath)
         return None
 
     rows = []
     for topic, msg, time in bag.read_messages(topics=['/fmcl/localization_status']):
-        timestamp = msg.header.stamp.secs + msg.header.stamp.nsecs * 10**-9 # Use numpy for higher precision
+        secs = msg.header.stamp.secs
+        nsecs = msg.header.stamp.nsecs
         valid = msg.localization_valid
-        score = msg.legacy_localization_score
+        legacy_score = msg.legacy_localization_score
+        patch_map_score = msg.patch_map_score
 
         rows.append(
             pd.DataFrame([
-                [timestamp, valid, score]
-            ], columns=['timestamp', 'localization_valid', 'legacy_localization_score'])
+                [secs, nsecs, valid, legacy_score, patch_map_score]
+            ], columns=['secs', 'nsecs', 'localization_valid', 'legacy_localization_score', 'patch_map_score'])
         )
     
     if len(rows) == 0:
-        logger.warn('cannot find any localization status data from %s because len=0' % filename)
+        logger.warn('cannot find any localization status data from %s because len=0' % filepath)
         return None
 
+    # Change index to date time object
+    # Example: pd.Timestamp(1513393355, unit='s', tz='America/Los_Angeles')
     localization_status_df = pd.concat(rows, ignore_index=True)
-    localization_status_df.index = localization_status_df['timestamp']
+    localization_status_df.index = pd.to_datetime(
+        localization_status_df['secs']*10**9 + localization_status_df['nsecs'], unit='ns')
 
     rows = []
     for topic, msg, time in bag.read_messages(topics=['/fmcl/localization_score']):
-        timestamp = msg.header.stamp.secs + msg.header.stamp.nsecs * 10**-9 # Use numpy for higher precision
+        secs = msg.header.stamp.secs
+        nsecs = msg.header.stamp.nsecs
         x = msg.pose.position.x
         y = msg.pose.position.y
         importance = msg.scores.importance
@@ -47,38 +53,43 @@ def load_fmcl_localization_data(filename):
         dynamic = msg.scores.dynamic
         rows.append(
             pd.DataFrame([
-                [timestamp, x, y, importance, likelihood, clear, dynamic]
-            ], columns=['timestamp', 'x', 'y', 'importance', 'likelihood', 'clear', 'dynamic'])
+                [secs, nsecs, x, y, importance, likelihood, clear, dynamic]
+            ], columns=['secs', 'nsecs', 'x', 'y', 'importance', 'likelihood', 'clear', 'dynamic'])
         )
 
+    # Change index to date time object
+    # Example: pd.Timestamp(1513393355, unit='s', tz='America/Los_Angeles')
     localization_score_df = pd.concat(rows, ignore_index=True)
-    localization_score_df.index = localization_score_df['timestamp']
+    localization_score_df.index = pd.to_datetime(
+        localization_score_df['secs']*10**9 + localization_score_df['nsecs'], unit='ns')
 
     # Merge the two DF
     return pd.concat([localization_status_df,localization_score_df], axis=1)
 
 
-def visualize_coordinates(df):
+def visualize_coordinates(df, columns=['patch_map_score']):
     ax = plt.axes(projection='3d')
-    ax.scatter3D(
-        df['x'].to_numpy(),
-        df['y'].to_numpy(),
-        df['likelihood'].to_numpy(), c='gray',
-                                     label='likelihood')
-    ax.scatter3D(
-        df['x'].to_numpy(),
-        df['y'].to_numpy(),
-        df['importance'].to_numpy(), c='orange',
-                                     label='importance')
-    ax.scatter3D(
-        df['x'].to_numpy(),
-        df['y'].to_numpy(),
-        df['legacy_localization_score'].to_numpy(), c='red',
-                                                    label='legacy_localization_score')
+
+    for col in columns:
+        ax.scatter3D(
+            df['x'].to_numpy(),
+            df['y'].to_numpy(),
+            df[col].to_numpy(), label=col)
 
     ax.set_xlabel('x')  
     ax.set_ylabel('y')
-    ax.set_zlabel('localization score value unnormalized')
-    ax.set_title('coordinate vs localization health')
+    ax.set_zlabel('localization metrics')
+    ax.set_title('Localization by Spatial Coordinate')
     plt.legend()
     plt.show()
+
+
+def load_messages_helper(filepath):
+    try:
+        bag = rosbag.Bag(filepath)   
+    except rosbag.bag.ROSBagUnindexedException:
+        logger.warn('%s is unindexed' % filepath)
+        return None
+
+    for topic, msg, time in bag.read_messages(topics=['/fmcl/localization_status']):
+        print msg
