@@ -1,11 +1,59 @@
 import pandas as pd
 import rosbag
+import pdb
+import numpy as np
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+def _get_localization_status_df(bag):
+    timestamps = []
+    rows = []
+    for topic, msg, time in bag.read_messages(topics=['/fmcl/localization_status']):
+        timestamps.append(msg.header.stamp.secs*10**9 + msg.header.stamp.nsecs)
+        valid = msg.localization_valid
+        legacy_score = msg.legacy_localization_score
+        patch_map_score = msg.patch_map_score
+
+        rows.append(
+            pd.DataFrame([
+                [valid, legacy_score, patch_map_score]
+            ], columns=['localization_valid', 'legacy_localization_score', 'patch_map_score'])
+        )
+    
+    if len(rows) == 0:
+        logger.warn('cannot find any localization status data from %s because len=0' % filepath)
+        raise ValueError('localization status data is empty')
+
+    return pd.concat(rows, ignore_index=True), np.array(timestamps)
+
+
+def _get_localization_score_df(bag):
+    timestamps = []
+    rows = []
+    for topic, msg, time in bag.read_messages(topics=['/fmcl/localization_score']):
+        timestamps.append(msg.header.stamp.secs*10**9 + msg.header.stamp.nsecs)
+        x = msg.pose.position.x
+        y = msg.pose.position.y
+        importance = msg.scores.importance
+        likelihood = msg.scores.likelihood
+        clear = msg.scores.clear
+        dynamic = msg.scores.dynamic
+        rows.append(
+            pd.DataFrame([
+                [x, y, importance, likelihood, clear, dynamic]
+            ], columns=['x', 'y', 'importance', 'likelihood', 'clear', 'dynamic'])
+        )
+
+    if len(rows) == 0:
+        logger.warn('cannot find any localization score data from %s because len=0' % filepath)
+        raise ValueError('localization score data is empty')
+
+    return pd.concat(rows, ignore_index=True), np.array(timestamps)
 
 
 def load_fmcl_localization_data(filepath):
@@ -17,54 +65,29 @@ def load_fmcl_localization_data(filepath):
         logger.warn('%s is unindexed' % filepath)
         return None
 
-    rows = []
-    for topic, msg, time in bag.read_messages(topics=['/fmcl/localization_status']):
-        secs = msg.header.stamp.secs
-        nsecs = msg.header.stamp.nsecs
-        valid = msg.localization_valid
-        legacy_score = msg.legacy_localization_score
-        patch_map_score = msg.patch_map_score
+    loc_status_df, loc_status_ts = _get_localization_status_df(bag)
+    loc_score_df, loc_score_ts = _get_localization_score_df(bag)
 
-        rows.append(
-            pd.DataFrame([
-                [secs, nsecs, valid, legacy_score, patch_map_score]
-            ], columns=['secs', 'nsecs', 'localization_valid', 'legacy_localization_score', 'patch_map_score'])
-        )
+    are_timestamps_aligned = False
+    # There is a possibility one of the topic is missing a message or two.
+    if loc_status_ts.size > loc_score_ts.size:
+        delta = loc_status_ts.size - loc_score_ts.size
+        loc_status_ts = loc_status_ts[:-delta]
+    elif loc_status_ts.size < loc_score_ts.size:
+        delta = loc_score_ts.size - loc_status_ts.size
+        loc_score_ts = loc_score_ts[:-delta]
+
+    if not np.isclose(loc_status_ts, loc_score_ts).all():
+        raise ValueError('timestamps from two localization topics do not match')
     
-    if len(rows) == 0:
-        logger.warn('cannot find any localization status data from %s because len=0' % filepath)
-        return None
-
     # Change index to date time object
     # Example: pd.Timestamp(1513393355, unit='s', tz='America/Los_Angeles')
-    localization_status_df = pd.concat(rows, ignore_index=True)
-    localization_status_df.index = pd.to_datetime(
-        localization_status_df['secs']*10**9 + localization_status_df['nsecs'], unit='ns')
-
-    rows = []
-    for topic, msg, time in bag.read_messages(topics=['/fmcl/localization_score']):
-        secs = msg.header.stamp.secs
-        nsecs = msg.header.stamp.nsecs
-        x = msg.pose.position.x
-        y = msg.pose.position.y
-        importance = msg.scores.importance
-        likelihood = msg.scores.likelihood
-        clear = msg.scores.clear
-        dynamic = msg.scores.dynamic
-        rows.append(
-            pd.DataFrame([
-                [secs, nsecs, x, y, importance, likelihood, clear, dynamic]
-            ], columns=['secs', 'nsecs', 'x', 'y', 'importance', 'likelihood', 'clear', 'dynamic'])
-        )
-
-    # Change index to date time object
-    # Example: pd.Timestamp(1513393355, unit='s', tz='America/Los_Angeles')
-    localization_score_df = pd.concat(rows, ignore_index=True)
-    localization_score_df.index = pd.to_datetime(
-        localization_score_df['secs']*10**9 + localization_score_df['nsecs'], unit='ns')
-
+    timestamp_df = pd.DataFrame(pd.to_datetime(loc_status_ts, unit='ns'), columns=['timestamp'])
     # Merge the two DF
-    return pd.concat([localization_status_df,localization_score_df], axis=1)
+    df = pd.concat([timestamp_df, loc_status_df, loc_score_df], axis=1)
+    df.index = df['timestamp']
+    df['hour'] = df['timestamp'].dt.hour
+    return df
 
 
 def visualize_coordinates(df, columns=['patch_map_score']):
