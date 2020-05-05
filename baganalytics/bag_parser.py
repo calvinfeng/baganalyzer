@@ -55,6 +55,21 @@ def _get_localization_score_df(bag):
     return pd.concat(rows, ignore_index=True), np.array(timestamps)
 
 
+def load_battery_data(filepath):
+    """Extract battery state data from a bag file into DataFrame
+    """
+    try:
+        bag = rosbag.Bag(filepath)   
+    except rosbag.bag.ROSBagUnindexedException:
+        logger.warn('%s is unindexed' % filepath)
+        return None
+
+    for topic, msg, _ in bag.read_messages(topics=['/battery_state']):
+        print(msg)
+
+    bag.close()
+
+
 def load_fmcl_localization_data(filepath):
     """Extract localization status data from a bag file into DataFrame
     """
@@ -66,6 +81,7 @@ def load_fmcl_localization_data(filepath):
 
     loc_status_df, loc_status_ts = _get_localization_status_df(bag)
     loc_score_df, loc_score_ts = _get_localization_score_df(bag)
+    bag.close()
 
     are_timestamps_aligned = False
     # There is a possibility one of the topic is missing a message or two.

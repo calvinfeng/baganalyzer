@@ -4,7 +4,7 @@ import pandas as pd
 import pdb
 
 from baganalytics import BagLoader
-from baganalytics import load_fmcl_localization_data, visualize_coordinates
+from baganalytics import load_fmcl_localization_data, visualize_coordinates, load_battery_data
 
 # Logging
 import logging
@@ -25,7 +25,7 @@ def download_nav_bags(instance, robots=[], num_bags_per_robot=100):
         logger.info('successfully downloaded %s bags for %s' % (len(bags), robot))
 
 
-if __name__ == '__main__':
+def localization_analytics():
     logger = logging.getLogger(__name__)
 
     # instance = 'arrow-rt.fetchcore-cloud.com'
@@ -61,3 +61,20 @@ if __name__ == '__main__':
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     final_df.to_csv(os.path.join(output_dir, 'localization_score_1_sec_interval.csv'))
+
+
+def battery_analytics():
+    instance = 'ge-selmer.fetchcore-cloud.com'
+
+    filepaths = []
+    for f in os.listdir(os.path.join(RAW_DATA_DIR, instance)):
+        path = os.path.join(RAW_DATA_DIR, instance, f)
+        if os.path.isfile(path):
+            filepaths.append(path)
+
+    for path in filepaths:
+        load_battery_data(path)
+
+
+if __name__ == '__main__':
+    battery_analytics()
