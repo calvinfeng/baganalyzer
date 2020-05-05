@@ -3,3 +3,7 @@ bags/
 env/
 environment/
 *.pyc
+py2env/
+py3env/
+processed_data/
+.ipynb_checkpoints/

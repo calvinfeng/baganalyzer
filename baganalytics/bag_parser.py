@@ -18,7 +18,6 @@ def _get_localization_status_df(bag):
         valid = msg.localization_valid
         legacy_score = msg.legacy_localization_score
         patch_map_score = msg.patch_map_score
-
         rows.append(
             pd.DataFrame([
                 [valid, legacy_score, patch_map_score]
